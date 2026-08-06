@@ -24,9 +24,41 @@ def longest_unique_substring(s):
     return max_len
 
 
+def MinWindowSubstring(strArr):
+    n, k = strArr[0], strArr[1]
+
+    need = {}
+    for ch in k:
+        need[ch] = need.get(ch, 0) + 1
+    missing = len(k)
+
+    left = 0
+    best_left, best_right = 0, len(n) + 1  # invalid/sentinel range
+
+    for right, ch in enumerate(n, start=1):
+        if need.get(ch, 0) > 0:
+            missing -= 1
+        need[ch] = need.get(ch, 0) - 1
+
+        while missing == 0:
+            if right - left < best_right - best_left:
+                best_left, best_right = left, right
+            left_ch = n[left]
+            need[left_ch] = need.get(left_ch, 0) + 1
+            if need[left_ch] > 0:
+                missing += 1
+            left += 1
+
+    return n[best_left:best_right] if best_right <= len(n) else ""
+
+
 if __name__ == "__main__":
     assert longest_unique_substring("abcabcbb") == 3
     assert longest_unique_substring("bbbbb") == 1
     assert longest_unique_substring("pwwkew") == 3
     assert longest_unique_substring("") == 0
     print("All longest_unique_substring tests passed.")
+
+    print(MinWindowSubstring(["aaabaaddae", "aed"]))
+    assert MinWindowSubstring(["aaabaaddae", "aed"]) == "dae"
+    print("All MinWindowSubstring tests passed.")

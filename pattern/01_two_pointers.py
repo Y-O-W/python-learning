@@ -26,7 +26,10 @@ def two_sum_sorted(arr, target):
 
 
 if __name__ == "__main__":
+    print(two_sum_sorted([1, 2, 3, 4, 6], 6))
     assert two_sum_sorted([1, 2, 3, 4, 6], 6) == [1, 3]
+    print(two_sum_sorted([2, 7, 11, 15], 9))
     assert two_sum_sorted([2, 7, 11, 15], 9) == [0, 1]
+    print(two_sum_sorted([1, 2, 3], 100))
     assert two_sum_sorted([1, 2, 3], 100) is None
     print("All two_sum_sorted tests passed.")
