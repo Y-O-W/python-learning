@@ -6,6 +6,10 @@ Scrapes the ~1,774-company Maison&Objet exhibitor directory into a CSV
 
 Full docs — setup, usage, how the pipeline works, known fragility — live
 in README.md next to this file. Read that first.
+
+Environment variables:
+  ALGOLIA_APP_ID    - Algolia application ID (default: LPN4STGLQG)
+  ALGOLIA_API_KEY  - Algolia search-only API key (default: 3dfb0b32b6d93bd5a34dceabcc437108)
 """
 
 import argparse
@@ -15,9 +19,12 @@ import math                 # chunk_pages() rounds its split up, not down
 import multiprocessing      # --workers: see scrape_parallel()
 import os
 import re
+import sys                  # scrape(): force line-buffered stdout, see comment there
 import time
 import unicodedata          # slugify(): strips accents to match M&O's URL convention
-import urllib.request       # fetch_listing_page() calls Algolia directly, no browser needed
+from http.client import TOO_MANY_REQUESTS
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen  # fetch_listing_page() calls Algolia directly, no browser needed
 
 # TimeoutError aliased so it doesn't shadow the builtin — this is the
 # specific exception a Playwright wait_for_* call raises on timeout.
@@ -26,8 +33,10 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 # Algolia: how we find companies, without a browser. Copied from the
 # listing page's own <script> tag — a search-only key meant to be called
 # from any browser, not a secret. See README.md if these ever stop working.
-ALGOLIA_APP_ID = "LPN4STGLQG"
-ALGOLIA_API_KEY = "3dfb0b32b6d93bd5a34dceabcc437108"
+# Load from environment variables, with fallback to the original public keys
+# for backward compatibility.
+ALGOLIA_APP_ID = os.getenv("ALGOLIA_APP_ID", "LPN4STGLQG")
+ALGOLIA_API_KEY = os.getenv("ALGOLIA_API_KEY", "3dfb0b32b6d93bd5a34dceabcc437108")
 ALGOLIA_QUERY_URL = (
     f"https://{ALGOLIA_APP_ID.lower()}-dsn.algolia.net/1/indexes/*/queries"
     f"?x-algolia-agent=Algolia+for+Python"
@@ -146,13 +155,24 @@ def fetch_listing_page(page_num, log_prefix="", attempts=3):
     result = None
     for attempt in range(1, attempts + 1):
         try:
-            request = urllib.request.Request(
+            request = Request(
                 ALGOLIA_QUERY_URL, data=body,
                 headers={"Content-Type": "application/json"}, method="POST",
             )
-            with urllib.request.urlopen(request, timeout=15) as response:
+            with urlopen(request, timeout=15) as response:
                 result = json.load(response)
             break
+        except HTTPError as e:
+            # Handle rate limiting (HTTP 429) with Retry-After header
+            if e.code == TOO_MANY_REQUESTS:
+                retry_after = int(e.headers.get("Retry-After", 60))
+                print(f"{log_prefix}  ! Rate limited for page {page_num}. "
+                      f"Retrying after {retry_after} seconds...")
+                time.sleep(retry_after)
+                continue  # Retry the same attempt after waiting
+            last_error = e
+            print(f"{log_prefix}  ! Algolia request failed for page {page_num} "
+                  f"(attempt {attempt}/{attempts}): HTTP {e.code} - {e.reason}")
         except Exception as e:
             last_error = e
             print(f"{log_prefix}  ! Algolia request failed for page {page_num} "
@@ -193,6 +213,15 @@ def scrape(pages, out_path):
     # so several workers' interleaved logs stay legible.
     proc_name = multiprocessing.current_process().name
     log_prefix = f"[{proc_name}] " if proc_name != "MainProcess" else ""
+
+    # When stdout isn't a terminal (redirected to a file, as in a real
+    # full run), Python block-buffers it -- and a `python -u` on the main
+    # process does NOT reliably propagate into a worker spawned by
+    # multiprocessing, so a worker's print()s can sit invisible for many
+    # minutes even though it's actively scraping (observed directly: CSV
+    # checkpoints kept growing correctly while the log showed nothing).
+    # Force line buffering here so progress is visible as it happens.
+    sys.stdout.reconfigure(line_buffering=True)
 
     rows = []
     seen_profile_urls = set()
