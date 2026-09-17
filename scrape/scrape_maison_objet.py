@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Maison&Objet exhibitor scraper
 
